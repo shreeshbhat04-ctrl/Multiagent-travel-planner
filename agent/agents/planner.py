@@ -152,6 +152,10 @@ def _normalize_itinerary_payload(parsed: dict) -> dict:
         normalized = dict(flight)
         if normalized.get("cost_estimate") and not normalized.get("price_estimate"):
             normalized["price_estimate"] = normalized.pop("cost_estimate")
+        if normalized.get("duration") is not None and not isinstance(normalized.get("duration"), str):
+            normalized["duration"] = str(normalized["duration"])
+        if normalized.get("price_estimate") is not None and not isinstance(normalized.get("price_estimate"), str):
+            normalized["price_estimate"] = str(normalized["price_estimate"])
 
         normalized.setdefault(
             "departure_airport",
