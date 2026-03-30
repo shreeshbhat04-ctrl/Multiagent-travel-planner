@@ -1,0 +1,242 @@
+# MCP Toolbox — Travel Agent Tools (v0.31+ flat format)
+#
+# Exposes BigQuery + travel-specific HTTP tools to the Data Fetcher Agent.
+#
+# Start the server:
+#   python start_mcp.py
+#
+# Docs: https://googleapis.github.io/genai-toolbox/
+
+sources:
+  thelook-bq:
+    kind: bigquery
+    project: ${GOOGLE_CLOUD_PROJECT}
+
+  google-maps-api:
+    kind: http
+    baseUrl: https://places.googleapis.com
+
+  google-routes-api:
+    kind: http
+    baseUrl: https://routes.googleapis.com
+
+  openweathermap-api:
+    kind: http
+    baseUrl: https://api.openweathermap.org
+
+  aviationstack-api:
+    kind: http
+    baseUrl: https://api.aviationstack.com
+
+tools:
+  # ── BigQuery Travel Intelligence Tools ────────────────
+  get-schema:
+    kind: bigquery-sql
+    source: thelook-bq
+    description: >
+      Retrieve the schema for all tables in the travel_intelligence dataset.
+      Tables: destinations, airport_lookup, seasonal_insights, trip_history.
+    statement: |
+      SELECT table_name, column_name, data_type, is_nullable
+      FROM `${GOOGLE_CLOUD_PROJECT}.travel_intelligence.INFORMATION_SCHEMA.COLUMNS`
+      ORDER BY table_name, ordinal_position
+
+  execute-query:
+    kind: bigquery-sql
+    source: thelook-bq
+    description: >
+      Execute a read-only SQL query against BigQuery.
+      Query the travel_intelligence dataset for destination data,
+      airport lookups, seasonal insights, and trip history.
+      Only SELECT statements with LIMIT clauses are allowed.
+    parameters:
+      - name: query
+        type: string
+        description: SQL SELECT query to execute against travel_intelligence tables
+    statement: "{{query}}"
+
+  destination-lookup:
+    kind: bigquery-sql
+    source: thelook-bq
+    description: >
+      Look up destination intelligence — cost index, safety score, visa
+      requirements, average daily budget, best months to visit, and
+      airport IATA codes. Use this FIRST before searching for places
+      to get budget and visa context for the planner.
+    parameters:
+      - name: city
+        type: string
+        description: City name to look up (e.g. "Tokyo", "Paris")
+    statement: |
+      SELECT d.city, d.country, d.continent, d.lat, d.lng, d.iata_code,
+             d.timezone, d.currency, d.language, d.cost_index, d.safety_score,
+             d.visa_required_for_india, d.avg_daily_budget_usd, d.best_months,
+             d.description,
+             a.airport_name
+      FROM `${GOOGLE_CLOUD_PROJECT}.travel_intelligence.destinations` d
+      LEFT JOIN `${GOOGLE_CLOUD_PROJECT}.travel_intelligence.airport_lookup` a
+        ON d.iata_code = a.iata_code
+      WHERE LOWER(d.city) = LOWER('{{city}}')
+      LIMIT 1
+
+  seasonal-insights:
+    kind: bigquery-sql
+    source: thelook-bq
+    description: >
+      Get monthly weather and crowd data for a destination.
+      Returns avg temperature, rainfall, crowd level, and whether the
+      month is recommended for visiting. Use when the user specifies
+      travel dates to check conditions.
+    parameters:
+      - name: city
+        type: string
+        description: City name (e.g. "Tokyo")
+      - name: month
+        type: string
+        description: Month number 1-12 (e.g. "4" for April)
+    statement: |
+      SELECT city, month, avg_temp_c, rain_mm, crowd_level, recommended, note
+      FROM `${GOOGLE_CLOUD_PROJECT}.travel_intelligence.seasonal_insights`
+      WHERE LOWER(city) = LOWER('{{city}}')
+        AND month = CAST('{{month}}' AS INT64)
+      LIMIT 1
+
+  # ── Google Maps Place Search ──────────────────────────
+  search-places:
+    kind: http
+    source: google-maps-api
+    method: POST
+    path: /v1/places:searchText
+    description: >
+      Search for places (attractions, restaurants, hotels) near a location
+      using the Google Places API (Text Search). Returns up to 20 results
+      with names, addresses, ratings, and coordinates.
+    headers:
+      Content-Type: application/json
+      X-Goog-Api-Key: ${GOOGLE_MAPS_API_KEY}
+      X-Goog-FieldMask: "places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.location,places.id,places.types,places.priceLevel,places.editorialSummary,places.currentOpeningHours"
+    requestBody: |
+      {
+        "textQuery": "{{.query}}",
+        "maxResultCount": 20
+      }
+    bodyParams:
+      - name: query
+        type: string
+        description: >
+          Search query, e.g. "best restaurants in Tokyo" or
+          "tourist attractions near Eiffel Tower"
+
+  # ── Google Maps Place Details ─────────────────────────
+  place-details:
+    kind: http
+    source: google-maps-api
+    method: POST
+    path: /v1/places:searchText
+    description: >
+      Get detailed information about a specific place including reviews,
+      operating hours, and contact info. Returns a single detailed result.
+    headers:
+      Content-Type: application/json
+      X-Goog-Api-Key: ${GOOGLE_MAPS_API_KEY}
+      X-Goog-FieldMask: "places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.location,places.id,places.reviews,places.currentOpeningHours,places.editorialSummary,places.websiteUri,places.priceLevel"
+    requestBody: |
+      {
+        "textQuery": "{{.query}}",
+        "maxResultCount": 1
+      }
+    bodyParams:
+      - name: query
+        type: string
+        description: >
+          Descriptive query for the place, e.g. "Senso-ji Temple Tokyo"
+          or "The Ritz London hotel"
+
+  # ── Google Maps Directions ────────────────────────────
+  get-directions:
+    kind: http
+    source: google-routes-api
+    method: POST
+    path: /directions/v2:computeRoutes
+    description: >
+      Get directions and travel time between two locations using Google
+      Routes API. Returns duration, distance, and step-by-step directions.
+    headers:
+      Content-Type: application/json
+      X-Goog-Api-Key: ${GOOGLE_MAPS_API_KEY}
+      X-Goog-FieldMask: "routes.duration,routes.distanceMeters,routes.legs"
+    requestBody: |
+      {
+        "origin": {"address": "{{.origin}}"},
+        "destination": {"address": "{{.destination}}"},
+        "travelMode": "TRANSIT"
+      }
+    bodyParams:
+      - name: origin
+        type: string
+        description: Starting location, e.g. "Shibuya Station, Tokyo"
+      - name: destination
+        type: string
+        description: Destination location, e.g. "Tokyo Tower, Tokyo"
+
+  # ── Weather Forecast ──────────────────────────────────
+  get-weather:
+    kind: http
+    source: openweathermap-api
+    method: GET
+    path: /data/2.5/forecast
+    description: >
+      Get current weather and 5-day forecast for a city using
+      OpenWeatherMap API. Returns temperature, humidity, wind, and
+      weather conditions.
+    queryParams:
+      - name: q
+        type: string
+        description: City name, e.g. "Tokyo" or "Paris,FR"
+      - name: units
+        type: string
+        description: Units of measurement (metric or imperial)
+      - name: cnt
+        type: string
+        description: Number of forecast timestamps to return (max 40)
+      - name: appid
+        type: string
+        description: OpenWeatherMap API key
+
+  # ── Flight Search ─────────────────────────────────────
+  search-flights:
+    kind: http
+    source: aviationstack-api
+    method: GET
+    path: /v1/flights
+    description: >
+      Search for available flights between two airports.
+      Provide origin/destination as IATA codes (e.g. BLR, NRT).
+    queryParams:
+      - name: access_key
+        type: string
+        description: AviationStack API key
+      - name: dep_iata
+        type: string
+        description: Departure airport IATA code, e.g. "BLR"
+      - name: arr_iata
+        type: string
+        description: Arrival airport IATA code, e.g. "NRT"
+      - name: flight_date
+        type: string
+        description: Flight date YYYY-MM-DD
+      - name: limit
+        type: string
+        description: Max results to return
+
+toolsets:
+  travel-agent-tools:
+    - get-schema
+    - execute-query
+    - destination-lookup
+    - seasonal-insights
+    - search-places
+    - place-details
+    - get-directions
+    - get-weather
+    - search-flights

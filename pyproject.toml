@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "a2a-travel-planner"
+version = "1.0.0"
+description = "Multi-Agent A2A Travel Planner with CaMeL Security, MCP Data Fetching, and 3D Globe Frontend"
+authors = ["shree"]
+readme = "README.md"
+packages = [{include = "agent"}, {include = "backend"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+langchain-core = "^0.3"
+langchain-google-genai = "^2.0"
+langgraph = "^0.3"
+google-cloud-bigquery = "^3.25"
+pydantic = "^2.0"
+pydantic-settings = "^2.0"
+python-dotenv = "^1.0"
+toolbox-core = "^0.1"
+rich = "^13.0"
+fastapi = "^0.115"
+uvicorn = "^0.30"
+httpx = "^0.27"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+pytest-asyncio = "^0.24"
+
+[tool.poetry.scripts]
+run-agent = "agent.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
