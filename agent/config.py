@@ -48,6 +48,10 @@ class AgentConfig(BaseSettings):
         default=None,
         description="AviationStack API Key for flight lookups",
     )
+    serpapi_api_key: Optional[str] = Field(
+        default=None,
+        description="SerpApi key for Google Flights results",
+    )
     aviationstack_api_key: Optional[str] = Field(
         default=None,
         description="AviationStack API Key for flight status/search",

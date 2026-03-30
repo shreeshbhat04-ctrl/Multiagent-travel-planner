@@ -57,6 +57,11 @@ def _extract_hotel_candidates(places_data: list[dict]) -> list[dict]:
     return candidates
 
 
+def _normalize_hotel_candidates(hotel_data: list[dict], places_data: list[dict]) -> list[dict]:
+    """Prefer explicit hotel data, falling back to lodging-like places."""
+    return hotel_data or _extract_hotel_candidates(places_data)
+
+
 def _enforce_source_backed_logistics(itinerary: dict, flight_data: list[dict], hotel_candidates: list[dict]) -> dict:
     """Remove planner-invented logistics when no live source data exists."""
     if not flight_data:
@@ -78,7 +83,8 @@ def planner_node(state: Dict) -> Dict:
     places_data = state.get("places_data", [])
     weather_data = state.get("weather_data", {})
     flight_data = state.get("flight_data", [])
-    hotel_candidates = _extract_hotel_candidates(places_data)
+    hotel_data = state.get("hotel_data", [])
+    hotel_candidates = _normalize_hotel_candidates(hotel_data, places_data)
 
     # Build context for the planner
     context_parts = []
@@ -93,9 +99,9 @@ def planner_node(state: Dict) -> Dict:
     else:
         context_parts.append("\nFLIGHT OPTIONS:\n[]\nNo live flights were returned. Do not invent flights.")
     if hotel_candidates:
-        context_parts.append(f"\nHOTEL CANDIDATES:\n{json.dumps(hotel_candidates[:10], indent=2)}")
+        context_parts.append(f"\nHOTEL OPTIONS:\n{json.dumps(hotel_candidates[:10], indent=2)}")
     else:
-        context_parts.append("\nHOTEL CANDIDATES:\n[]\nNo live hotel recommendations were returned. Do not invent hotels.")
+        context_parts.append("\nHOTEL OPTIONS:\n[]\nNo live hotel recommendations were returned. Do not invent hotels.")
 
     data_context = "\n".join(context_parts)
 

@@ -26,7 +26,7 @@ Multi-agent travel planning with CaMeL-style security checks, MCP-based data fet
 - Google BigQuery for destination intelligence and schema retrieval
 - Google Maps APIs for places and route-related travel data
 - OpenWeatherMap for forecast data
-- AviationStack for flight data
+- SerpApi for Google Flights and Google Hotels data
 
 ### Frontend
 
@@ -104,7 +104,7 @@ cd the_project
 pip install -r requirements.txt
 ```
 
-### 2. Configure API Keys
+### 2. Configure Environment
 
 ```bash
 cp .env.example .env
@@ -113,9 +113,13 @@ cp .env.example .env
 Edit `.env` and fill in:
 
 - `GOOGLE_API_KEY` - Gemini API key (required)
-- `GOOGLE_MAPS_API_KEY` - Places + Routes API key (recommended)
-- `OPENWEATHERMAP_API_KEY` - Free tier weather data (recommended)
-- `AVIATIONSTACK_API_KEY` - Flight data (optional)
+- `GOOGLE_CLOUD_PROJECT` - GCP project id for BigQuery and MCP sources
+- `GOOGLE_MAPS_API_KEY` - Places + Routes + browser map key
+- `OPENWEATHERMAP_API_KEY` - weather forecast key
+- `SERPAPI_API_KEY` - SerpApi key for Google Flights and Google Hotels
+- `BQ_SOURCE_DATASET` - BigQuery dataset, usually `your-project.travel_intelligence`
+- `MCP_TOOLBOX_URI` - keep `http://127.0.0.1:5000` for local and in-container MCP
+- `MCP_TOOLBOX_PORT` - defaults to `5000`
 
 ### 3. Authenticate with Google Cloud
 
@@ -151,6 +155,69 @@ npm install
 npm run dev
 ```
 
+## Cloud Run Deployment
+
+This repo is prepared for a single-container Cloud Run deployment:
+
+- the React frontend is built into `frontend/dist`
+- FastAPI serves both the API and the built frontend
+- the MCP toolbox runs inside the same container on `127.0.0.1:5000`
+
+Deployment files:
+
+- `Dockerfile`
+- `start_cloud_run.sh`
+- `.dockerignore`
+- `cloudbuild.yaml`
+
+Required runtime env vars:
+
+- `GOOGLE_API_KEY`
+- `GOOGLE_CLOUD_PROJECT`
+- `GOOGLE_CLOUD_LOCATION`
+- `GOOGLE_CLOUD_REGION`
+- `GOOGLE_MAPS_API_KEY`
+- `OPENWEATHERMAP_API_KEY`
+- `SERPAPI_API_KEY`
+- `BQ_SOURCE_DATASET`
+- `MCP_TOOLBOX_URI=http://127.0.0.1:5000`
+- `MCP_TOOLBOX_PORT=5000`
+
+Build and deploy:
+
+```bash
+gcloud builds submit --config cloudbuild.yaml .
+
+gcloud run deploy a2a-travel-planner \
+  --image gcr.io/YOUR_PROJECT_ID/a2a-travel-planner:YOUR_IMAGE_TAG \
+  --region us-central1 \
+  --platform managed \
+  --allow-unauthenticated \
+  --set-env-vars MCP_TOOLBOX_URI=http://127.0.0.1:5000,MCP_TOOLBOX_PORT=5000
+```
+
+Notes:
+
+- Cloud Run injects `PORT`; the container now uses it automatically.
+- BigQuery auth should come from the Cloud Run service account.
+- If you want frontend requests to hit the same deployed origin, leave `VITE_API_BASE_URL` unset when building.
+- Restart and redeploy after changing MCP tool definitions in `mcp_server/tools.yaml`.
+
+Suggested Cloud Run secret/env setup:
+
+- plain env vars:
+  - `GOOGLE_CLOUD_PROJECT`
+  - `GOOGLE_CLOUD_LOCATION`
+  - `GOOGLE_CLOUD_REGION`
+  - `BQ_SOURCE_DATASET`
+  - `MCP_TOOLBOX_URI`
+  - `MCP_TOOLBOX_PORT`
+- secrets:
+  - `GOOGLE_API_KEY`
+  - `GOOGLE_MAPS_API_KEY`
+  - `OPENWEATHERMAP_API_KEY`
+  - `SERPAPI_API_KEY`
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
@@ -179,7 +246,9 @@ the_project/
 |-- mcp_server/
 |   `-- tools.yaml            # MCP tool configuration
 |-- start_mcp.py              # MCP server launcher
+|-- start_cloud_run.sh        # Cloud Run startup script
 |-- setup_bq.py               # BigQuery setup helper
+|-- cloudbuild.yaml           # Cloud Build pipeline
 |-- requirements.txt
 |-- pyproject.toml
 `-- Dockerfile

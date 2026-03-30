@@ -8,6 +8,7 @@ Exposed as an A2A Server: receives requests, calls MCP tools, returns results.
 import json
 import logging
 import uuid
+from datetime import date, timedelta
 from typing import Dict, Optional
 
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
@@ -96,7 +97,62 @@ def _normalize_flight_record(record: object) -> Optional[dict]:
     return record
 
 
-def _merge_fetched_payload(payload: object, places_data: list, weather_data: dict, flight_data: list) -> None:
+def _normalize_serpapi_itinerary(record: object) -> Optional[dict]:
+    """Normalize SerpApi Google Flights itinerary payloads."""
+    if not isinstance(record, dict):
+        return None
+
+    segments = record.get("flights")
+    if not isinstance(segments, list) or not segments:
+        return None
+
+    first_segment = segments[0] if isinstance(segments[0], dict) else {}
+    last_segment = segments[-1] if isinstance(segments[-1], dict) else {}
+
+    departure_airport = first_segment.get("departure_airport", {}) if isinstance(first_segment.get("departure_airport"), dict) else {}
+    arrival_airport = last_segment.get("arrival_airport", {}) if isinstance(last_segment.get("arrival_airport"), dict) else {}
+    airlines = [seg.get("airline") for seg in segments if isinstance(seg, dict) and seg.get("airline")]
+
+    return {
+        "airline": " / ".join(dict.fromkeys(airlines)) if airlines else "Unknown airline",
+        "flight_number": first_segment.get("flight_number"),
+        "departure_airport": departure_airport.get("id") or "TBD",
+        "arrival_airport": arrival_airport.get("id") or "TBD",
+        "departure_time": departure_airport.get("time") or "TBD",
+        "arrival_time": arrival_airport.get("time") or "TBD",
+        "duration": record.get("total_duration") or first_segment.get("duration"),
+        "price_estimate": record.get("price"),
+        "booking_class": first_segment.get("travel_class"),
+    }
+
+
+def _normalize_serpapi_hotel(record: object) -> Optional[dict]:
+    """Normalize SerpApi Google Hotels property payloads."""
+    if not isinstance(record, dict):
+        return None
+
+    gps = record.get("gps_coordinates", {}) if isinstance(record.get("gps_coordinates"), dict) else {}
+    rate_per_night = record.get("rate_per_night", {}) if isinstance(record.get("rate_per_night"), dict) else {}
+    total_rate = record.get("total_rate", {}) if isinstance(record.get("total_rate"), dict) else {}
+
+    price_per_night = (
+        rate_per_night.get("lowest")
+        or rate_per_night.get("extracted_lowest")
+        or record.get("price")
+        or total_rate.get("lowest")
+    )
+
+    return {
+        "name": record.get("name") or "Unknown hotel",
+        "lat": gps.get("latitude", 0),
+        "lng": gps.get("longitude", 0),
+        "rating": record.get("overall_rating") or record.get("rating"),
+        "price_per_night": str(price_per_night) if price_per_night is not None else None,
+        "notes": record.get("description") or record.get("type") or record.get("amenities"),
+    }
+
+
+def _merge_fetched_payload(payload: object, places_data: list, weather_data: dict, flight_data: list, hotel_data: list) -> None:
     """Merge a fetched-data payload into the processor accumulators."""
     if not payload:
         return
@@ -116,7 +172,7 @@ def _merge_fetched_payload(payload: object, places_data: list, weather_data: dic
         for nested_key in ("data", "result", "body", "response", "content", "payload"):
             nested_payload = payload.get(nested_key)
             if nested_payload and nested_payload is not payload:
-                _merge_fetched_payload(nested_payload, places_data, weather_data, flight_data)
+                _merge_fetched_payload(nested_payload, places_data, weather_data, flight_data, hotel_data)
 
         places = payload.get("places") or payload.get("results")
         if isinstance(places, list):
@@ -139,6 +195,20 @@ def _merge_fetched_payload(payload: object, places_data: list, weather_data: dic
                 if normalized:
                     flight_data.append(normalized)
 
+        serpapi_flights = (payload.get("best_flights") or []) + (payload.get("other_flights") or [])
+        if isinstance(serpapi_flights, list):
+            for flight in serpapi_flights:
+                normalized = _normalize_serpapi_itinerary(flight)
+                if normalized:
+                    flight_data.append(normalized)
+
+        properties = payload.get("properties")
+        if isinstance(properties, list):
+            for hotel in properties:
+                normalized = _normalize_serpapi_hotel(hotel)
+                if normalized:
+                    hotel_data.append(normalized)
+
     elif isinstance(payload, list) and payload and isinstance(payload[0], dict):
         if (
             "flight_number" in payload[0]
@@ -151,6 +221,11 @@ def _merge_fetched_payload(payload: object, places_data: list, weather_data: dic
                 normalized = _normalize_flight_record(flight)
                 if normalized:
                     flight_data.append(normalized)
+        elif "gps_coordinates" in payload[0] or "rate_per_night" in payload[0] or "overall_rating" in payload[0]:
+            for hotel in payload:
+                normalized = _normalize_serpapi_hotel(hotel)
+                if normalized:
+                    hotel_data.append(normalized)
         else:
             places_data.extend(payload)
 
@@ -180,7 +255,7 @@ def _tool_name_from_message(msg) -> str:
 
 def _expected_tool_names(travel_params: dict) -> set[str]:
     """Determine which travel tools should run for the current request."""
-    expected = {"destination-lookup", "search-places", "get-weather"}
+    expected = {"destination-lookup", "search-places", "search-hotels", "get-weather"}
     if travel_params.get("start_date") and travel_params.get("start_date") != "flexible":
         expected.add("seasonal-insights")
     if travel_params.get("origin") and travel_params.get("origin") not in {"", "not specified"}:
@@ -275,8 +350,8 @@ def _build_search_flights_tool_call(state: Dict, travel_params: dict) -> Optiona
     if not origin or origin == "not specified" or not destination:
         return None
 
-    if not config.aviationstack_api_key:
-        logger.warning("Skipping flight search because AVIATIONSTACK_API_KEY is not configured.")
+    if not config.serpapi_api_key:
+        logger.warning("Skipping flight search because SERPAPI_API_KEY is not configured.")
         return None
 
     dep_iata = _extract_iata_from_state(state, origin)
@@ -284,18 +359,27 @@ def _build_search_flights_tool_call(state: Dict, travel_params: dict) -> Optiona
     if not dep_iata or not arr_iata:
         return None
 
-    args = {
-        "access_key": config.aviationstack_api_key,
-        "dep_iata": dep_iata,
-        "arr_iata": arr_iata,
-        "limit": "8",
-    }
     start_date = travel_params.get("start_date")
-    if start_date and start_date != "flexible":
-        args["flight_date"] = start_date
+    end_date = travel_params.get("end_date")
+    one_way = not end_date or end_date == "flexible"
+    outbound_date = start_date if start_date and start_date != "flexible" else (date.today() + timedelta(days=30)).isoformat()
+
+    args = {
+        "api_key": config.serpapi_api_key,
+        "engine": "google_flights",
+        "departure_id": dep_iata,
+        "arrival_id": arr_iata,
+        "outbound_date": outbound_date,
+        "type": "2" if one_way else "1",
+        "currency": "USD",
+        "hl": "en",
+        "gl": "us",
+    }
+    if not one_way and end_date and end_date != "flexible":
+        args["return_date"] = end_date
 
     return AIMessage(
-        content=f"Searching flights from {dep_iata} to {arr_iata}.",
+        content=f"Searching Google Flights results from {dep_iata} to {arr_iata}.",
         name="DataFetcher",
         tool_calls=[{
             "name": "search-flights",
@@ -306,11 +390,58 @@ def _build_search_flights_tool_call(state: Dict, travel_params: dict) -> Optiona
     )
 
 
+def _derive_trip_dates(travel_params: dict) -> tuple[str, str]:
+    """Return concrete check-in/check-out dates even for flexible requests."""
+    start_date = travel_params.get("start_date")
+    end_date = travel_params.get("end_date")
+    num_days = max(int(travel_params.get("num_days", 3) or 3), 1)
+
+    check_in = start_date if start_date and start_date != "flexible" else (date.today() + timedelta(days=30)).isoformat()
+    if end_date and end_date != "flexible":
+        check_out = end_date
+    else:
+        check_out = (date.fromisoformat(check_in) + timedelta(days=num_days)).isoformat()
+
+    return check_in, check_out
+
+
+def _build_search_hotels_tool_call(travel_params: dict) -> Optional[AIMessage]:
+    """Build a deterministic search-hotels tool call."""
+    destination = travel_params.get("destination", "")
+    if not destination or not config.serpapi_api_key:
+        return None
+
+    check_in, check_out = _derive_trip_dates(travel_params)
+    budget_level = travel_params.get("budget_level", "mid-range")
+    query = f"{destination} hotels {budget_level}".strip()
+
+    return AIMessage(
+        content=f"Searching Google Hotels results for {destination}.",
+        name="DataFetcher",
+        tool_calls=[{
+            "name": "search-hotels",
+            "args": {
+                "api_key": config.serpapi_api_key,
+                "engine": "google_hotels",
+                "q": query,
+                "check_in_date": check_in,
+                "check_out_date": check_out,
+                "currency": "USD",
+                "hl": "en",
+                "gl": "us",
+            },
+            "id": f"search_hotels_{uuid.uuid4().hex[:8]}",
+            "type": "tool_call",
+        }],
+    )
+
+
 def _build_data_summary(state: Dict) -> dict:
     """Aggregate currently available travel data from the message history."""
     places_data = []
     weather_data = {}
     flight_data = []
+    hotel_data = []
 
     for msg in state.get("messages", []):
         content = _content_to_text(getattr(msg, "content", ""))
@@ -321,7 +452,7 @@ def _build_data_summary(state: Dict) -> dict:
                 content[:300] if content else "",
             )
         if content:
-            _merge_fetched_payload(content, places_data, weather_data, flight_data)
+            _merge_fetched_payload(content, places_data, weather_data, flight_data, hotel_data)
 
         tool_calls = getattr(msg, "tool_calls", []) or []
         for tool_call in tool_calls:
@@ -334,12 +465,14 @@ def _build_data_summary(state: Dict) -> dict:
                     places_data,
                     weather_data,
                     flight_data,
+                    hotel_data,
                 )
 
     return {
         "places": places_data,
         "weather": weather_data,
         "flights": flight_data,
+        "hotels": hotel_data,
     }
 
 
@@ -393,6 +526,14 @@ def data_fetcher_node(state: Dict) -> Dict:
         messages.append(HumanMessage(content=fetch_instructions))
     else:
         logger.info("Data Fetcher continuing tool execution loop...")
+        if not _tool_call_requested(state, "search-hotels"):
+            hotel_tool_call = _build_search_hotels_tool_call(travel_params)
+            if hotel_tool_call is not None:
+                return {
+                    "messages": [hotel_tool_call],
+                    "sender": "DataFetcher",
+                }
+
         if origin and origin not in {"", "not specified"}:
             if not _tool_call_requested(state, "airport-lookup", city=origin) and not _extract_iata_from_state(state, origin):
                 return {
@@ -508,6 +649,11 @@ def _build_fetch_request(travel_params: dict) -> str:
     step += 1
 
     parts.append("")
+    parts.append(f"{step}. **search-hotels**: Search for hotel options in {dest}.")
+    parts.append("   Return real accommodation options with pricing/rating if available.")
+    step += 1
+
+    parts.append("")
     parts.append(f"{step}. **get-weather**: Get the weather forecast for {dest}.")
     step += 1
 
@@ -536,6 +682,7 @@ def _build_fetch_request(travel_params: dict) -> str:
     )
     if origin and origin not in {"", "not specified"}:
         parts.append("IMPORTANT: Do not call `SubmitFetchedData` until you have attempted `search-flights`.")
+    parts.append("IMPORTANT: Do not call `SubmitFetchedData` until you have attempted `search-hotels`.")
     parts.append("")
     parts.append("Call `SubmitFetchedData` with ALL the gathered data as a JSON string.")
 
@@ -545,7 +692,7 @@ def _build_fetch_request(travel_params: dict) -> str:
 def process_fetched_data(state: Dict) -> Dict:
     """Process raw tool results into structured data for the Planner.
 
-    Extracts places, weather, and flight data from the message history
+    Extracts places, weather, flight, and hotel data from the message history
     and stores them in state for the Planner to consume.
     """
     logger.info("Processing fetched data for Planner...")
@@ -553,12 +700,13 @@ def process_fetched_data(state: Dict) -> Dict:
     places_data = []
     weather_data = {}
     flight_data = []
+    hotel_data = []
 
     # Scan messages for tool results and SubmitFetchedData payloads
     for msg in state.get("messages", []):
         content = _content_to_text(getattr(msg, "content", ""))
         if content:
-            _merge_fetched_payload(content, places_data, weather_data, flight_data)
+            _merge_fetched_payload(content, places_data, weather_data, flight_data, hotel_data)
 
         tool_calls = getattr(msg, "tool_calls", []) or []
         for tool_call in tool_calls:
@@ -571,18 +719,21 @@ def process_fetched_data(state: Dict) -> Dict:
                     places_data,
                     weather_data,
                     flight_data,
+                    hotel_data,
                 )
 
     logger.info(
-        "Fetched data summary: %d places, weather=%s, %d flights",
+        "Fetched data summary: %d places, weather=%s, %d flights, %d hotels",
         len(places_data),
         bool(weather_data),
         len(flight_data),
+        len(hotel_data),
     )
 
     return {
         "places_data": places_data if places_data else None,
         "weather_data": weather_data if weather_data else None,
         "flight_data": flight_data if flight_data else None,
+        "hotel_data": hotel_data if hotel_data else None,
         "sender": "DataProcessor",
     }

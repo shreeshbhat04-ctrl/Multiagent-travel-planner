@@ -8,10 +8,12 @@ import json
 import uuid
 import logging
 from typing import Optional
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
 
@@ -63,6 +65,7 @@ class AgentEvent(BaseModel):
 
 # ── In-memory session store ──────────────────────────────
 _sessions: dict = {}
+FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 
 # ── Endpoints ────────────────────────────────────────────
@@ -170,3 +173,24 @@ async def get_itinerary(thread_id: str):
     if thread_id in _sessions:
         return _sessions[thread_id]
     raise HTTPException(status_code=404, detail="Itinerary not found")
+
+
+if FRONTEND_DIST.exists():
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+    @app.get("/", include_in_schema=False)
+    async def serve_frontend_index():
+        return FileResponse(FRONTEND_DIST / "index.html")
+
+    @app.get("/{path_name:path}", include_in_schema=False)
+    async def serve_frontend_app(path_name: str):
+        if path_name.startswith(("plan", "health", "itinerary", "docs", "openapi.json", "redoc")):
+            raise HTTPException(status_code=404, detail="Not found")
+
+        candidate = FRONTEND_DIST / path_name
+        if candidate.exists() and candidate.is_file():
+            return FileResponse(candidate)
+
+        return FileResponse(FRONTEND_DIST / "index.html")

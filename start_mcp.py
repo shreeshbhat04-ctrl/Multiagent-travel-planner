@@ -27,12 +27,17 @@ print(f"   Weather API: {'✅' if weather_key and not weather_key.startswith('yo
 
 # Run the toolbox executable with the loaded environment variables
 try:
-    executable = "toolbox.exe" if os.name == "nt" else "./toolbox"
+    if os.name == "nt":
+        executable = "toolbox.exe"
+    else:
+        executable = "./toolbox" if os.path.exists("./toolbox") else "toolbox"
+
+    toolbox_port = os.getenv("MCP_TOOLBOX_PORT", "5000")
 
     subprocess.run([
         executable,
         "--config=mcp_server/tools.yaml",
-        "--port=5000"
+        f"--port={toolbox_port}"
     ], env=os.environ, check=True)
 except FileNotFoundError:
     print(f"❌ ERROR: Could not find '{executable}'. Download from:")

@@ -31,6 +31,7 @@ class AgentState(TypedDict):
         places_data: Cached place details from Maps API.
         weather_data: Cached weather forecasts for destination.
         flight_data: Cached flight search results.
+        hotel_data: Cached hotel search results.
     """
 
     messages: Annotated[list[AnyMessage], add_messages]
@@ -41,3 +42,4 @@ class AgentState(TypedDict):
     places_data: Optional[list[dict]]
     weather_data: Optional[dict]
     flight_data: Optional[list[dict]]
+    hotel_data: Optional[list[dict]]

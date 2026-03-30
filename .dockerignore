@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+ve1
+frontend/node_modules
+frontend/dist
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+toolbox.exe
+frontend/referenc.txt

@@ -24,9 +24,9 @@ sources:
     kind: http
     baseUrl: https://api.openweathermap.org
 
-  aviationstack-api:
+  serpapi-api:
     kind: http
-    baseUrl: https://api.aviationstack.com
+    baseUrl: https://serpapi.com
 
 tools:
   # ── BigQuery Travel Intelligence Tools ────────────────
@@ -223,28 +223,77 @@ tools:
   # ── Flight Search ─────────────────────────────────────
   search-flights:
     kind: http
-    source: aviationstack-api
+    source: serpapi-api
     method: GET
-    path: /v1/flights
+    path: /search.json
     description: >
-      Search for available flights between two airports.
-      Provide origin/destination as IATA codes (e.g. BLR, NRT).
+      Search Google Flights results through SerpApi.
+      Provide origin/destination as IATA codes (e.g. BLR, CDG).
     queryParams:
-      - name: access_key
+      - name: api_key
         type: string
-        description: AviationStack API key
-      - name: dep_iata
+        description: SerpApi key
+      - name: engine
+        type: string
+        description: Search engine identifier, use google_flights
+      - name: departure_id
         type: string
         description: Departure airport IATA code, e.g. "BLR"
-      - name: arr_iata
+      - name: arrival_id
         type: string
-        description: Arrival airport IATA code, e.g. "NRT"
-      - name: flight_date
+        description: Arrival airport IATA code, e.g. "CDG"
+      - name: outbound_date
         type: string
-        description: Flight date YYYY-MM-DD
-      - name: limit
+        description: Outbound date YYYY-MM-DD
+      - name: return_date
         type: string
-        description: Max results to return
+        description: Return date YYYY-MM-DD for round trips
+      - name: type
+        type: string
+        description: 1 for round-trip, 2 for one-way
+      - name: currency
+        type: string
+        description: Currency code, e.g. USD
+      - name: hl
+        type: string
+        description: Language code, e.g. en
+      - name: gl
+        type: string
+        description: Country code, e.g. us
+
+  search-hotels:
+    kind: http
+    source: serpapi-api
+    method: GET
+    path: /search.json
+    description: >
+      Search Google Hotels results through SerpApi.
+      Provide a destination query and check-in/check-out dates.
+    queryParams:
+      - name: api_key
+        type: string
+        description: SerpApi key
+      - name: engine
+        type: string
+        description: Search engine identifier, use google_hotels
+      - name: q
+        type: string
+        description: Destination hotel query, e.g. "Bali Resorts"
+      - name: check_in_date
+        type: string
+        description: Check-in date YYYY-MM-DD
+      - name: check_out_date
+        type: string
+        description: Check-out date YYYY-MM-DD
+      - name: currency
+        type: string
+        description: Currency code, e.g. USD
+      - name: hl
+        type: string
+        description: Language code, e.g. en
+      - name: gl
+        type: string
+        description: Country code, e.g. us
 
 toolsets:
   travel-agent-tools:
@@ -258,3 +307,4 @@ toolsets:
     - get-directions
     - get-weather
     - search-flights
+    - search-hotels
