@@ -26,7 +26,7 @@ from .nodes import (
 from .agents.orchestrator import orchestrator_node
 from .agents.planner import planner_node
 from .agents.data_fetcher import data_fetcher_node, process_fetched_data
-from .tools import get_tools
+from .tools import get_data_fetcher_tools
 from .config import config
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 def build_graph() -> StateGraph:
     """Build the multi-agent A2A travel planner graph."""
-    tools = get_tools()
+    tools = get_data_fetcher_tools()
 
     workflow = StateGraph(AgentState)
 
@@ -43,9 +43,7 @@ def build_graph() -> StateGraph:
     workflow.add_node("orchestrator", orchestrator_node)
     workflow.add_node("retrieve_schema", retrieve_schema_node)
     workflow.add_node("data_fetcher", data_fetcher_node)
-    workflow.add_node("execute_tools", ToolNode(
-        [t for t in tools if callable(t)]
-    ))
+    workflow.add_node("execute_tools", ToolNode(tools))
     workflow.add_node("process_data", process_fetched_data)
     workflow.add_node("planner", planner_node)
     workflow.add_node("present", _present_node)

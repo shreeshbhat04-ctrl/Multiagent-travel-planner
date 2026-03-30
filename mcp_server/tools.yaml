@@ -53,7 +53,7 @@ tools:
       - name: query
         type: string
         description: SQL SELECT query to execute against travel_intelligence tables
-    statement: "{{query}}"
+    statement: "{{.query}}"
 
   destination-lookup:
     kind: bigquery-sql
@@ -76,7 +76,24 @@ tools:
       FROM `${GOOGLE_CLOUD_PROJECT}.travel_intelligence.destinations` d
       LEFT JOIN `${GOOGLE_CLOUD_PROJECT}.travel_intelligence.airport_lookup` a
         ON d.iata_code = a.iata_code
-      WHERE LOWER(d.city) = LOWER('{{city}}')
+      WHERE LOWER(d.city) = LOWER('{{.city}}')
+      LIMIT 1
+
+  airport-lookup:
+    kind: bigquery-sql
+    source: thelook-bq
+    description: >
+      Resolve a city to its primary airport and IATA code.
+      Use this for flight searches when you need airport codes
+      for an origin or destination city.
+    parameters:
+      - name: city
+        type: string
+        description: City name to resolve (e.g. "Delhi", "Tokyo")
+    statement: |
+      SELECT city, country, airport_name, iata_code, lat, lng
+      FROM `${GOOGLE_CLOUD_PROJECT}.travel_intelligence.airport_lookup`
+      WHERE LOWER(city) = LOWER('{{.city}}')
       LIMIT 1
 
   seasonal-insights:
@@ -97,8 +114,8 @@ tools:
     statement: |
       SELECT city, month, avg_temp_c, rain_mm, crowd_level, recommended, note
       FROM `${GOOGLE_CLOUD_PROJECT}.travel_intelligence.seasonal_insights`
-      WHERE LOWER(city) = LOWER('{{city}}')
-        AND month = CAST('{{month}}' AS INT64)
+      WHERE LOWER(city) = LOWER('{{.city}}')
+        AND month = CAST('{{.month}}' AS INT64)
       LIMIT 1
 
   # ── Google Maps Place Search ──────────────────────────
@@ -234,6 +251,7 @@ toolsets:
     - get-schema
     - execute-query
     - destination-lookup
+    - airport-lookup
     - seasonal-insights
     - search-places
     - place-details

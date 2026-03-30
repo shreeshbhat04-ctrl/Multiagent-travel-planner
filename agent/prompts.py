@@ -151,7 +151,9 @@ CRITICAL RULES:
 - Every waypoint MUST have lat/lng coordinates
 - Include realistic time estimates and costs
 - Keep the schedule achievable — don't pack 15 stops into one day
-- If data is limited, use your knowledge to supplement with reasonable estimates
+- You may supplement sightseeing context when place data is sparse, but NEVER invent flights or hotels
+- If live flight data is unavailable, return `"flights": []`
+- If live hotel data is unavailable, return `"hotels": []`
 """
 
 # ── Data Fetcher Agent Prompt ─────────────────────────────────────────────────
@@ -166,23 +168,25 @@ AVAILABLE TOOLS (call in this priority order):
 1. **destination-lookup**: Get destination profile from our database
    - Returns: cost_index, safety_score, visa info, daily budget, IATA code, currency
    - ALWAYS call this first to get baseline destination data
-2. **seasonal-insights**: Get monthly weather/crowd conditions
+2. **airport-lookup**: Resolve a city to its primary airport and IATA code
+   - Use this when the user provides an origin city and you need dep_iata/arr_iata
+3. **seasonal-insights**: Get monthly weather/crowd conditions
    - Returns: avg_temp, rainfall, crowd_level, recommended (bool)
    - Call when user specifies travel dates
-3. **execute-query**: Run custom SQL against travel_intelligence dataset
+4. **execute-query**: Run custom SQL against travel_intelligence dataset
    - Tables: destinations, airport_lookup, seasonal_insights, trip_history
 
 **External APIs (call after BigQuery):**
-4. **search-places**: Find attractions, restaurants, hotels near a location
+5. **search-places**: Find attractions, restaurants, hotels near a location
    - Provide: location name or coordinates, type of place, radius
-5. **place-details**: Get detailed info about a specific place
+6. **place-details**: Get detailed info about a specific place
    - Provide: place name and location for detailed reviews, hours, rating
-6. **get-directions**: Get transit directions between two points
+7. **get-directions**: Get transit directions between two points
    - Provide: origin and destination coordinates or names
-7. **get-weather**: Get weather forecast for a location
+8. **get-weather**: Get weather forecast for a location
    - Provide: city or coordinates
-8. **search-flights**: Search for available flights
-   - Provide: origin, destination, dates
+9. **search-flights**: Search for available flights
+   - Provide: dep_iata, arr_iata, and dates when available
 
 ═══════════════════════════════════════════════════════════════════════
 EXECUTION RULES:
@@ -192,6 +196,8 @@ EXECUTION RULES:
 - After gathering all data, call `SubmitFetchedData` with a JSON summary
 - NEVER fabricate data — if a tool returns empty results, report that
 - Be efficient — don't call the same tool twice with identical parameters
+- When the user provides an origin city, resolve airport codes before flight search
+- Do not submit fetched data until you have attempted `search-flights` for trips with an origin
 """
 
 # ── Legacy Data Agent Prompt (kept for BQ-only analytics) ─────────────────────

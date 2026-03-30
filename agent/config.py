@@ -44,6 +44,14 @@ class AgentConfig(BaseSettings):
         default=None,
         description="OpenWeatherMap API Key (free tier)",
     )
+    aviationstack_api_key: Optional[str] = Field(
+        default=None,
+        description="AviationStack API Key for flight lookups",
+    )
+    aviationstack_api_key: Optional[str] = Field(
+        default=None,
+        description="AviationStack API Key for flight status/search",
+    )
 
     # ── BigQuery ──────────────────────────────────────────
     bq_source_dataset: str = Field(

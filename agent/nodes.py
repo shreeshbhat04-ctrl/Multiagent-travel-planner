@@ -97,6 +97,10 @@ def route_from_verifier(state: Dict) -> str:
     last_message = state["messages"][-1]
     content = getattr(last_message, "content", "")
 
+    if isinstance(content, list):
+        text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and "text" in part]
+        content = "".join(text_parts) if text_parts else str(content)
+
     if content.startswith("REJECT:") or content.startswith("BLOCKED"):
         return "__end__"
     return "orchestrator"

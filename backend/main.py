@@ -128,7 +128,8 @@ async def plan_trip_stream(request: TravelRequest):
                     for msg in messages:
                         content = getattr(msg, "content", "")
                         if isinstance(content, list):
-                            content = str(content)
+                            text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and "text" in part]
+                            content = "".join(text_parts) if text_parts else str(content)
 
                         tool_calls = []
                         if hasattr(msg, "tool_calls") and msg.tool_calls:

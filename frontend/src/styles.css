@@ -138,6 +138,7 @@ button {
 .right-column {
   display: grid;
   gap: 24px;
+  min-width: 0;
 }
 
 .panel {
@@ -147,6 +148,8 @@ button {
   box-shadow: var(--shadow);
   padding: 24px;
   backdrop-filter: blur(22px);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .panel-hero {
@@ -165,6 +168,20 @@ button {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 20px;
+}
+
+.panel-heading > div,
+.header-meta,
+.hero-grid > div,
+.stat-card,
+.timeline-body,
+.logistics-column,
+.logistics-card,
+.day-summary > div,
+.waypoint-card,
+.legend-stop,
+.session-meta {
+  min-width: 0;
 }
 
 .panel-heading h2,
@@ -255,6 +272,11 @@ button {
 .ghost-chip {
   padding: 11px 14px;
   color: var(--muted);
+  flex: 1 1 220px;
+  justify-content: center;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.4;
 }
 
 .ghost-chip:hover,
@@ -356,6 +378,7 @@ button {
   padding: 14px;
   display: grid;
   gap: 12px;
+  overflow: hidden;
 }
 
 .timeline-badge {
@@ -393,6 +416,7 @@ button {
   color: var(--muted);
   font-size: 0.82rem;
   margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 
 .tool-chip,
@@ -414,6 +438,13 @@ button {
   display: grid;
   place-items: center;
   text-align: center;
+}
+
+.map-note {
+  margin: 14px 4px 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
 }
 
 .map-panel .map-frame {
@@ -582,6 +613,23 @@ button {
   border-color: rgba(255, 133, 119, 0.35);
 }
 
+.app-header h1,
+.panel-heading h2,
+.panel-hero h2,
+.assistant-message,
+.supporting-text,
+.timeline-body p,
+.logistics-card p,
+.logistics-card small,
+.waypoint-card p,
+.waypoint-card small,
+.stat-card strong,
+.legend-stop strong,
+.session-meta code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 @media (max-width: 1100px) {
   .layout-grid {
     grid-template-columns: 1fr;
@@ -608,6 +656,10 @@ button {
 
   .button-row {
     width: 100%;
+  }
+
+  .ghost-chip {
+    flex-basis: 100%;
   }
 
   .primary-button,

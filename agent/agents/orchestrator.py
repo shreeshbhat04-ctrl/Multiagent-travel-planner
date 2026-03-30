@@ -17,6 +17,23 @@ from ..prompts import ORCHESTRATOR_PROMPT
 logger = logging.getLogger(__name__)
 
 
+def _content_to_text(content) -> str:
+    """Flatten Gemini/LangChain content blocks into plain text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if text:
+                    parts.append(text)
+        return "\n".join(parts).strip()
+    return str(content)
+
+
 def _get_orchestrator_llm():
     """Get LLM for the orchestrator (no tools, just NL reasoning)."""
     return ChatGoogleGenerativeAI(
@@ -50,6 +67,7 @@ def orchestrator_node(state: Dict) -> Dict:
 
     llm = _get_orchestrator_llm()
     response = llm.invoke(messages)
+    response.content = _content_to_text(response.content)
     response.name = "Orchestrator"
 
     # Try to parse travel parameters from the orchestrator's response

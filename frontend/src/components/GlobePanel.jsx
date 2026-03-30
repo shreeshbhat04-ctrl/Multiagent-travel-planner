@@ -97,24 +97,27 @@ function FallbackGlobe({ stops, selectedStopId }) {
 export default function GlobePanel({ itinerary, activeDayIndex, selectedStopId }) {
   const containerRef = useRef(null);
   const [mapState, setMapState] = useState(GOOGLE_MAPS_API_KEY ? "loading" : "fallback");
+  const [mapNote, setMapNote] = useState("");
   const stops = buildTripStops(itinerary, activeDayIndex);
+  const shouldRenderGoogleHost = Boolean(itinerary && GOOGLE_MAPS_API_KEY && mapState !== "fallback");
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!itinerary || !GOOGLE_MAPS_API_KEY || !containerRef.current) {
+    if (!itinerary || !GOOGLE_MAPS_API_KEY) {
       setMapState(GOOGLE_MAPS_API_KEY ? "idle" : "fallback");
+      setMapNote(GOOGLE_MAPS_API_KEY ? "" : "Missing VITE_GOOGLE_MAPS_API_KEY.");
+      return undefined;
+    }
+
+    if (!containerRef.current) {
       return undefined;
     }
 
     async function renderMap() {
       try {
+        setMapNote("");
         const google = await loadGoogleMaps(GOOGLE_MAPS_API_KEY);
-        if (cancelled || !containerRef.current) {
-          return;
-        }
-
-        const { Map3DElement, Marker3DElement, Polyline3DElement } = await google.maps.importLibrary("maps3d");
         if (cancelled || !containerRef.current) {
           return;
         }
@@ -124,53 +127,111 @@ export default function GlobePanel({ itinerary, activeDayIndex, selectedStopId }
           stops.find((stop) => stop.kind === "destination") ||
           stops[0];
 
-        const map = new Map3DElement({
-          center: {
-            lat: focusStop?.lat || itinerary.destination?.lat || 0,
-            lng: focusStop?.lng || itinerary.destination?.lng || 0,
-            altitude: 120
-          },
-          range: 1200000,
-          tilt: 45,
-          heading: 20,
-          mode: "SATELLITE",
-          gestureHandling: "COOPERATIVE",
-          defaultLabelsDisabled: false
-        });
+        try {
+          const { Map3DElement, Marker3DElement, Polyline3DElement } = await google.maps.importLibrary("maps3d");
+          if (cancelled || !containerRef.current) {
+            return;
+          }
 
-        const path = stops.map((stop) => ({
-          lat: stop.lat,
-          lng: stop.lng,
-          altitude: stop.id === selectedStopId ? 160 : 80
-        }));
-
-        containerRef.current.innerHTML = "";
-        containerRef.current.append(map);
-
-        if (path.length > 1) {
-          const polyline = new Polyline3DElement({
-            path,
-            strokeColor: "#f6c26b",
-            strokeWidth: 8,
-            outerColor: "#fff6e3",
-            outerWidth: 2,
-            drawsOccludedSegments: true
+          const map = new Map3DElement({
+            center: {
+              lat: focusStop?.lat || itinerary.destination?.lat || 0,
+              lng: focusStop?.lng || itinerary.destination?.lng || 0,
+              altitude: 120
+            },
+            range: 1200000,
+            tilt: 45,
+            heading: 20,
+            mode: "SATELLITE",
+            gestureHandling: "COOPERATIVE",
+            defaultLabelsDisabled: false
           });
-          map.append(polyline);
+
+          const path = stops.map((stop) => ({
+            lat: stop.lat,
+            lng: stop.lng,
+            altitude: stop.id === selectedStopId ? 160 : 80
+          }));
+
+          containerRef.current.innerHTML = "";
+          containerRef.current.append(map);
+
+          if (path.length > 1) {
+            const polyline = new Polyline3DElement({
+              path,
+              strokeColor: "#f6c26b",
+              strokeWidth: 8,
+              outerColor: "#fff6e3",
+              outerWidth: 2,
+              drawsOccludedSegments: true
+            });
+            map.append(polyline);
+          }
+
+          stops.forEach((stop) => {
+            const marker = new Marker3DElement({
+              position: { lat: stop.lat, lng: stop.lng, altitude: stop.id === selectedStopId ? 120 : 40 },
+              title: stop.label
+            });
+            map.append(marker);
+          });
+
+          setMapState("ready-3d");
+          setMapNote("");
+          return;
+        } catch (threeDError) {
+          console.warn("Google Maps 3D failed to initialize, switching to 2D.", threeDError);
         }
 
-        stops.forEach((stop) => {
-          const marker = new Marker3DElement({
-            position: { lat: stop.lat, lng: stop.lng, altitude: stop.id === selectedStopId ? 120 : 40 },
-            title: stop.label
-          });
-          map.append(marker);
+        const { Map } = await google.maps.importLibrary("maps");
+        if (cancelled || !containerRef.current) {
+          return;
+        }
+
+        containerRef.current.innerHTML = "";
+        const map = new Map(containerRef.current, {
+          center: {
+            lat: focusStop?.lat || itinerary.destination?.lat || 0,
+            lng: focusStop?.lng || itinerary.destination?.lng || 0
+          },
+          zoom: 12,
+          mapTypeId: "roadmap",
+          streetViewControl: false,
+          mapTypeControl: false,
+          fullscreenControl: false
         });
 
-        setMapState("ready");
-      } catch {
+        const path = stops.map((stop) => ({ lat: stop.lat, lng: stop.lng }));
+        const bounds = new google.maps.LatLngBounds();
+
+        stops.forEach((stop) => {
+          new google.maps.Marker({
+            map,
+            position: { lat: stop.lat, lng: stop.lng },
+            title: stop.label
+          });
+          bounds.extend({ lat: stop.lat, lng: stop.lng });
+        });
+
+        if (path.length > 1) {
+          new google.maps.Polyline({
+            map,
+            path,
+            geodesic: true,
+            strokeColor: "#f6c26b",
+            strokeOpacity: 0.95,
+            strokeWeight: 4
+          });
+          map.fitBounds(bounds, 48);
+        }
+
+        setMapState("ready-2d");
+        setMapNote("Google Maps 3D is unavailable in this browser or key setup, so the app is showing a live 2D map instead.");
+      } catch (error) {
         if (!cancelled) {
+          console.error("Google Maps 3D failed to render.", error);
           setMapState("fallback");
+          setMapNote(error instanceof Error ? error.message : "Google Maps failed to load.");
         }
       }
     }
@@ -194,19 +255,30 @@ export default function GlobePanel({ itinerary, activeDayIndex, selectedStopId }
           <h2>Route lens</h2>
         </div>
         <span className="caption">
-          {mapState === "ready"
+          {mapState === "ready-3d"
             ? "Google Maps 3D"
+            : mapState === "ready-2d"
+              ? "Google Maps live 2D"
             : GOOGLE_MAPS_API_KEY
               ? mapState === "loading"
-                ? "Loading 3D map"
+                ? "Loading live map"
                 : "Fallback projection"
               : "Set VITE_GOOGLE_MAPS_API_KEY for 3D"}
         </span>
       </div>
 
       <div className="map-frame">
-        {mapState === "ready" ? <div ref={containerRef} className="google-map-host" /> : <FallbackGlobe stops={stops} selectedStopId={selectedStopId} />}
+        {shouldRenderGoogleHost ? (
+          <div ref={containerRef} className="google-map-host" />
+        ) : (
+          <FallbackGlobe stops={stops} selectedStopId={selectedStopId} />
+        )}
       </div>
+      {mapNote ? (
+        <p className="map-note">
+          {mapNote} Check the browser console, confirm Maps JavaScript API is enabled, and verify your key allows this localhost origin.
+        </p>
+      ) : null}
     </section>
   );
 }
